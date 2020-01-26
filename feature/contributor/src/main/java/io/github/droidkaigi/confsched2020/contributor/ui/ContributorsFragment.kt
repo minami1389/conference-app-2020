@@ -5,10 +5,10 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.view.isVisible
-import androidx.databinding.DataBindingUtil
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.observe
 import com.xwray.groupie.GroupAdapter
 import com.xwray.groupie.databinding.ViewHolder
 import dagger.Component
@@ -18,60 +18,75 @@ import io.github.droidkaigi.confsched2020.App
 import io.github.droidkaigi.confsched2020.contributor.R
 import io.github.droidkaigi.confsched2020.contributor.databinding.FragmentContributorsBinding
 import io.github.droidkaigi.confsched2020.contributor.ui.di.ContributorAssistedInjectModule
+import io.github.droidkaigi.confsched2020.contributor.ui.item.ContributorItem
 import io.github.droidkaigi.confsched2020.contributor.ui.viewmodel.ContributorsViewModel
 import io.github.droidkaigi.confsched2020.di.AppComponent
 import io.github.droidkaigi.confsched2020.di.PageScope
+import io.github.droidkaigi.confsched2020.ext.assistedActivityViewModels
 import io.github.droidkaigi.confsched2020.ext.assistedViewModels
+import io.github.droidkaigi.confsched2020.model.Contributor
+import io.github.droidkaigi.confsched2020.system.ui.viewmodel.SystemViewModel
 import io.github.droidkaigi.confsched2020.util.ProgressTimeLatch
-import io.github.droidkaigi.confsched2020.util.autoCleared
 import javax.inject.Inject
 import javax.inject.Provider
 
 class ContributorsFragment : Fragment() {
 
-    private var binding: FragmentContributorsBinding by autoCleared()
-
     @Inject lateinit var contributorsFactory: Provider<ContributorsViewModel>
     private val contributorsViewModel by assistedViewModels {
         contributorsFactory.get()
     }
-
-    private var progressTimeLatch: ProgressTimeLatch by autoCleared()
+    @Inject lateinit var systemViewModelProvider: Provider<SystemViewModel>
+    private val systemViewModel: SystemViewModel by assistedActivityViewModels {
+        systemViewModelProvider.get()
+    }
+    @Inject lateinit var contributorItemFactory: ContributorItem.Factory
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
-        binding = DataBindingUtil.inflate(
-            inflater,
+        return inflater.inflate(
             R.layout.fragment_contributors,
             container,
             false
         )
-        return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
-        val appComponent = (requireContext().applicationContext as App).appComponent
-        val component = DaggerContributorComponent.factory()
-            .create(appComponent, ContributorModule(this))
-        component.inject(this)
+        inject()
+        val binding = FragmentContributorsBinding.bind(view)
 
         val groupAdapter = GroupAdapter<ViewHolder<*>>()
         binding.contributorRecycler.adapter = groupAdapter
 
-        progressTimeLatch = ProgressTimeLatch { showProgress ->
+        val progressTimeLatch = ProgressTimeLatch { showProgress ->
             binding.progressBar.isVisible = showProgress
         }.apply {
             loading = true
         }
-        // TODO Implement
-//        contributorsViewModel.uiModel.observe(viewLifecycleOwner) { uiModel ->
-//
-//        }
+
+        contributorsViewModel.uiModel.observe(viewLifecycleOwner) { uiModel ->
+            progressTimeLatch.loading = uiModel.isLoading
+            groupAdapter.update(uiModel.contributors.toItems())
+            uiModel.error?.let {
+                systemViewModel.onError(it)
+            }
+        }
+    }
+
+    private fun List<Contributor>.toItems() =
+        map {
+            contributorItemFactory.create(it)
+        }
+
+    private fun inject() {
+        val appComponent = (requireContext().applicationContext as App).appComponent
+        val component = DaggerContributorComponent.factory()
+            .create(appComponent, ContributorModule(this))
+        component.inject(this)
     }
 }
 

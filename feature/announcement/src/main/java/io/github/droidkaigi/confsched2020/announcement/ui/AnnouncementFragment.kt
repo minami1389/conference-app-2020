@@ -7,7 +7,6 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
-import androidx.databinding.DataBindingUtil
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.observe
@@ -27,7 +26,6 @@ import io.github.droidkaigi.confsched2020.ext.assistedActivityViewModels
 import io.github.droidkaigi.confsched2020.ext.assistedViewModels
 import io.github.droidkaigi.confsched2020.system.ui.viewmodel.SystemViewModel
 import io.github.droidkaigi.confsched2020.util.ProgressTimeLatch
-import io.github.droidkaigi.confsched2020.util.autoCleared
 import javax.inject.Inject
 import javax.inject.Provider
 
@@ -48,47 +46,52 @@ class AnnouncementFragment : DaggerFragment() {
     @Inject
     lateinit var announcementItemFactory: AnnouncementItem.Factory
 
-    private var binding: FragmentAnnouncementBinding by autoCleared()
-
-    private var progressTimeLatch: ProgressTimeLatch by autoCleared()
-
     override fun onCreateView(
-        inflater: LayoutInflater, container: ViewGroup?,
+        inflater: LayoutInflater,
+        container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        binding = DataBindingUtil.inflate(
-            inflater,
+        return inflater.inflate(
             R.layout.fragment_announcement,
             container,
             false
         )
-        return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        val binding = FragmentAnnouncementBinding.bind(view)
 
         val groupAdapter = GroupAdapter<ViewHolder<*>>()
         binding.announcementRecycler.run {
-            addItemDecoration(AnnouncementItemDecoration(resources.getDimension(R.dimen.announcement_item_offset)))
+            val offset = resources.getDimension(R.dimen.announcement_item_offset)
+            addItemDecoration(AnnouncementItemDecoration(offset))
             adapter = groupAdapter
             doOnApplyWindowInsets { recyclerView, insets, initialState ->
                 // Set a bottom padding due to the system UI is enabled.
-                recyclerView.updatePadding(bottom = insets.systemWindowInsetBottom + initialState.paddings.bottom)
+                recyclerView.updatePadding(
+                    bottom = insets.systemWindowInsetBottom + initialState.paddings.bottom
+                )
             }
         }
 
-        progressTimeLatch = ProgressTimeLatch { showProgress ->
+        val progressTimeLatch = ProgressTimeLatch { showProgress ->
             binding.progressBar.isVisible = showProgress
         }.apply {
             loading = true
         }
-
+        announcementViewModel.loadLanguageSetting()
         announcementViewModel.uiModel.observe(viewLifecycleOwner) { uiModel ->
             progressTimeLatch.loading = uiModel.isLoading
             binding.emptyMessage.isVisible = uiModel.isEmpty
             groupAdapter.update(
-                uiModel.announcements.map { announcement -> announcementItemFactory.create(announcement) }
+                uiModel.announcements.map { announcement ->
+                    val showEllipsis = !uiModel.expandedItemIds.contains(announcement.id)
+                    announcementItemFactory.create(
+                        announcement,
+                        showEllipsis
+                    ) { announcementViewModel.expandItem(announcement.id) }
+                }
             )
             uiModel.error?.let {
                 systemViewModel.onError(it)
